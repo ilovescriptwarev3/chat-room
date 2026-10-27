@@ -1522,6 +1522,17 @@ server.listen(PORT, () => console.log('Chat relay on ws://localhost:' + PORT));
   function init() {
     loadSettings();
 
+    // A link can carry the relay and the room, so one shared URL lands everyone in the
+    // same place: ?server=wss://relay.example.workers.dev&room=family
+    const params = new URLSearchParams(location.search);
+    const urlParam = params.get('server');
+    const roomParam = params.get('room');
+
+    if (urlParam) state.url = urlParam.trim();
+    if (roomParam) {
+      state.room = roomParam.trim().toLowerCase().replace(/^#/, '').replace(/[^a-z0-9_-]/g, '').slice(0, 32) || state.room;
+    }
+
     if (!state.name) {
       state.name = 'Guest ' + Math.floor(100 + Math.random() * 900);
     }
