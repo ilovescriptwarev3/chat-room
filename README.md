@@ -34,12 +34,37 @@ your machine:
   `https://<service>.onrender.com` address becomes `wss://<service>.onrender.com` for the chat
   page. Free instances sleep when idle and wake on the next connection.
 - **Fly.io / Railway** — same relay, same idea, `wss://<app>.fly.dev`.
-- **Cloudflare Worker with a Durable Object** — the tidiest free option for a permanent
-  `wss://` address, if you are comfortable deploying a Worker.
+- **Cloudflare Worker** — `worker.js` and `wrangler.toml` in this folder are ready to deploy;
+  see below.
 
 Every browser that should share a room points at the same `wss://` address and the same room
 name. The default `wss://echo.websocket.org` is a test server that reflects your own messages
 and nothing else, so it will not connect two people.
+
+### Host the relay on Cloudflare
+
+`worker.js` is the same relay written as a Worker, with one Durable Object holding every room,
+and `wrangler.toml` is its config. From this folder:
+
+```sh
+npx wrangler login
+npx wrangler deploy
+```
+
+Wrangler prints an address like `https://chat-room-relay.<your-subdomain>.workers.dev`. Open it
+in a browser first: a plain page reading `Chat relay running.` means the Worker is live. Then in
+the chat page's **Settings**, set the server to `wss://chat-room-relay.<your-subdomain>.workers.dev`,
+and hand everyone the same room name.
+
+A few properties worth knowing:
+
+- The Durable Object keeps room history in memory and drops it when the last person leaves, so a
+  room is the conversation in progress rather than an archive.
+- `wrangler.toml` uses `new_sqlite_classes`, which is what Durable Objects on the free plan
+  require. `wrangler deploy` records the migration the first time and needs no further action.
+- There is no authentication on the relay. Anyone who knows the address and a room name can join
+  that room, so treat the address as the password.
+- Sockets are kept in memory, not hibernated, so the object stays warm while anyone is connected.
 
 ## A temporary link from your own machine
 

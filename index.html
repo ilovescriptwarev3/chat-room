@@ -822,6 +822,7 @@ server.listen(PORT, () => console.log('Chat relay on ws://localhost:' + PORT));
     attempts: 0,
     peers: [],
     mine: new Set(),
+    shown: new Set(),
     lastAuthor: '',
     lastAt: 0,
     lastRoom: '',
@@ -937,6 +938,7 @@ server.listen(PORT, () => console.log('Chat relay on ws://localhost:' + PORT));
       if (node !== el.empty) node.remove();
     });
     el.empty.hidden = false;
+    state.shown.clear();
     state.lastAuthor = '';
     state.lastAt = 0;
   }
@@ -1307,11 +1309,16 @@ server.listen(PORT, () => console.log('Chat relay on ws://localhost:' + PORT));
     const options = opts || {};
     const id = msg.id == null ? '' : String(msg.id);
 
-    if (id && !options.history && state.mine.has(id)) return;
+    if (id) {
+      if (options.history && state.shown.has(id)) return;
+      if (!options.history && state.mine.has(id)) return;
+    }
 
     const name = String(msg.name || 'anonymous');
     const text = String(msg.text == null ? '' : msg.text);
     const ts = Number(msg.ts) || now();
+
+    if (id) state.shown.add(id);
 
     addMessage({
       name: name,
@@ -1347,7 +1354,9 @@ server.listen(PORT, () => console.log('Chat relay on ws://localhost:' + PORT));
     }
 
     if (state.mine.size > 500) state.mine.clear();
+    if (state.shown.size > 1000) state.shown.clear();
     state.mine.add(id);
+    state.shown.add(id);
 
     addMessage({ name: state.name, text: body, ts: now(), self: true });
 
