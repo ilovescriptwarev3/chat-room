@@ -1,0 +1,1533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A single-file chat room that talks to a relay over WSS.">
+<title>Chat Room</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  :root{
+    --bg:#0a0c11;
+    --panel:#10131b;
+    --surface:#171b25;
+    --surface-2:#1f2431;
+    --line:rgba(255,255,255,.08);
+    --line-strong:rgba(255,255,255,.15);
+    --text:#e9edf7;
+    --muted:#8c94a8;
+    --accent:#7c5cff;
+    --accent-2:#22d3c5;
+    --ok:#3ddc84;
+    --warn:#ffb020;
+    --bad:#ff5d6c;
+    --radius:18px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  body{
+    font-family:var(--font);
+    color:var(--text);
+    background:
+      radial-gradient(1200px 620px at 12% -12%, rgba(124,92,255,.24), transparent 62%),
+      radial-gradient(900px 520px at 100% 0%, rgba(34,211,197,.15), transparent 58%),
+      var(--bg);
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .app{
+    height:100vh;
+    height:100dvh;
+    max-width:920px;
+    margin:0 auto;
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    border-inline:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(16,19,27,.72),rgba(10,12,17,.9));
+    backdrop-filter:blur(6px);
+  }
+
+  /* ---------- header ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:calc(12px + env(safe-area-inset-top)) 16px 12px;
+    border-bottom:1px solid var(--line);
+    background:rgba(10,12,17,.55);
+    backdrop-filter:blur(14px);
+    position:sticky;
+    top:0;
+    z-index:5;
+  }
+  .brand{display:flex;align-items:center;gap:11px;min-width:0}
+  .logo{
+    display:grid;
+    place-items:center;
+    width:38px;height:38px;
+    border-radius:12px;
+    color:#fff;
+    background:linear-gradient(135deg,var(--accent),#3b82f6 55%,var(--accent-2));
+    box-shadow:0 6px 20px rgba(124,92,255,.35);
+    flex:none;
+  }
+  .logo svg{width:20px;height:20px}
+  .brand-text{min-width:0}
+  .brand-text h1{
+    margin:0;
+    font-size:15px;
+    font-weight:650;
+    letter-spacing:.2px;
+  }
+  .room{
+    display:block;
+    font-size:12.5px;
+    color:var(--muted);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .top-actions{display:flex;align-items:center;gap:8px;flex:none}
+
+  .status{
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    padding:7px 12px;
+    border-radius:999px;
+    border:1px solid var(--line-strong);
+    background:rgba(255,255,255,.04);
+    font-size:12px;
+    font-weight:550;
+    color:var(--muted);
+    cursor:pointer;
+    transition:border-color .18s ease,background .18s ease,color .18s ease;
+    white-space:nowrap;
+  }
+  .status:hover{background:rgba(255,255,255,.08)}
+  .status .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 0 0 currentColor;
+  }
+  .status[data-state="online"]{color:var(--ok);border-color:rgba(61,220,132,.35);background:rgba(61,220,132,.1)}
+  .status[data-state="connecting"],
+  .status[data-state="retrying"]{color:var(--warn);border-color:rgba(255,176,32,.35);background:rgba(255,176,32,.1)}
+  .status[data-state="offline"],
+  .status[data-state="error"]{color:var(--bad);border-color:rgba(255,93,108,.35);background:rgba(255,93,108,.1)}
+  .status[data-state="connecting"] .dot,
+  .status[data-state="retrying"] .dot{animation:pulse 1.15s ease-in-out infinite}
+  @keyframes pulse{
+    0%,100%{transform:scale(.8);opacity:.55}
+    50%{transform:scale(1.25);opacity:1}
+  }
+
+  .icon-btn{
+    display:grid;place-items:center;
+    width:38px;height:38px;
+    border-radius:11px;
+    border:1px solid var(--line-strong);
+    background:rgba(255,255,255,.04);
+    cursor:pointer;
+    transition:background .18s ease,transform .18s ease;
+  }
+  .icon-btn:hover{background:rgba(255,255,255,.1)}
+  .icon-btn:active{transform:scale(.96)}
+  .icon-btn svg{width:18px;height:18px}
+
+  /* -------- scroll area ---- */
+  .stream{
+    flex:1;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    padding:18px 16px 8px;
+    scrollbar-width:thin;
+    scrollbar-color:rgba(255,255,255,.16) transparent;
+  }
+  .stream::-webkit-scrollbar{width:8px}
+  .stream::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:8px}
+
+  .empty{
+    margin:auto;
+    max-width:420px;
+    padding:28px 22px;
+    text-align:center;
+    color:var(--muted);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:10px;
+    min-height:100%;
+    justify-content:center;
+  }
+  .empty[hidden]{display:none}
+  .empty .glyph{
+    display:grid;place-items:center;
+    width:60px;height:60px;
+    border-radius:18px;
+    color:var(--accent);
+    background:rgba(124,92,255,.12);
+    border:1px solid rgba(124,92,255,.28);
+    margin-bottom:4px;
+  }
+  .empty .glyph svg{width:28px;height:28px}
+  .empty h2{margin:0;color:var(--text);font-size:17px;font-weight:640}
+  .empty p{margin:0;font-size:13.5px;line-height:1.55}
+  .empty strong{color:var(--text);font-weight:600}
+
+  .row{
+    display:flex;
+    align-items:flex-end;
+    gap:10px;
+    margin-bottom:14px;
+    animation:rise .24s ease both;
+  }
+  .row.self{flex-direction:row-reverse}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .avatar{
+    flex:none;
+    width:32px;height:32px;
+    border-radius:50%;
+    display:grid;place-items:center;
+    font-size:12px;font-weight:700;
+    letter-spacing:.3px;
+    color:#fff;
+    background:linear-gradient(135deg,hsl(var(--h) 72% 58%),hsl(calc(var(--h) + 40) 78% 46%));
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+  }
+  .row.grouped .avatar{visibility:hidden}
+
+  .body{min-width:0;max-width:min(76%,560px);display:flex;flex-direction:column;gap:3px}
+  .row.self .body{align-items:flex-end}
+  .meta{
+    display:flex;align-items:baseline;gap:8px;
+    font-size:11.5px;color:var(--muted);padding:0 3px;
+  }
+  .row.self .meta{flex-direction:row-reverse}
+  .row.grouped .meta{display:none}
+  .who{font-weight:600;color:#b6bdd0}
+  .meta time{font-variant-numeric:tabular-nums;font-size:10.5px;opacity:.75}
+
+  .bubble{
+    padding:9px 13px;
+    border-radius:16px;
+    border-bottom-left-radius:6px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    font-size:14.5px;
+    line-height:1.45;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+  }
+  .row.self .bubble{
+    border-bottom-left-radius:16px;
+    border-bottom-right-radius:6px;
+    background:linear-gradient(135deg,rgba(124,92,255,.95),rgba(76,110,245,.92));
+    border-color:rgba(255,255,255,.12);
+    color:#fff;
+  }
+  .row.grouped .bubble{border-radius:16px}
+  .row.grouped.self .bubble{border-radius:16px}
+
+  .system{
+    align-self:center;
+    max-width:min(88%,560px);
+    margin:2px auto 14px;
+    padding:5px 12px;
+    border-radius:999px;
+    background:rgba(255,255,255,.05);
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:11.5px;
+    line-height:1.4;
+    text-align:center;
+    animation:rise .24s ease both;
+  }
+
+  /* ---------- typing ---------- */
+  .typing{
+    height:18px;
+    padding:0 20px;
+    font-size:11.5px;
+    color:var(--muted);
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .typing span{opacity:0;transition:opacity .2s ease}
+  .typing.on span{opacity:1}
+  .typing i{
+    width:4px;height:4px;border-radius:50%;
+    background:var(--muted);
+    display:inline-block;
+    animation:bounce 1.1s infinite;
+  }
+  .typing i:nth-child(2){animation-delay:.15s}
+  .typing i:nth-child(3){animation-delay:.3s}
+  @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-3px);opacity:1}}
+
+  /* ---------- composer ---------- */
+  .composer{
+    display:flex;
+    align-items:flex-end;
+    gap:10px;
+    padding:10px 14px calc(12px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);
+    background:rgba(10,12,17,.72);
+    backdrop-filter:blur(14px);
+  }
+  .composer textarea{
+    flex:1;
+    min-height:44px;
+    max-height:132px;
+    resize:none;
+    padding:11px 14px;
+    border-radius:14px;
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    color:var(--text);
+    font:inherit;
+    font-size:15px;
+    line-height:1.4;
+    transition:border-color .18s ease,box-shadow .18s ease;
+    scrollbar-width:thin;
+  }
+  .composer textarea::placeholder{color:#6f7789}
+  .composer textarea:focus{
+    outline:none;
+    border-color:rgba(124,92,255,.6);
+    box-shadow:0 0 0 3px rgba(124,92,255,.16);
+  }
+  .send{
+    flex:none;
+    display:grid;place-items:center;
+    width:44px;height:44px;
+    border:none;
+    border-radius:14px;
+    color:#fff;
+    background:linear-gradient(135deg,var(--accent),#4c6ef5);
+    cursor:pointer;
+    transition:transform .16s ease,opacity .16s ease,filter .16s ease;
+    box-shadow:0 8px 20px rgba(124,92,255,.32);
+  }
+  .send svg{width:20px;height:20px}
+  .send:hover:not(:disabled){filter:brightness(1.08)}
+  .send:active:not(:disabled){transform:scale(.94)}
+  .send:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
+
+  /* ---------- toast ---------- */
+  .toast{
+    position:absolute;
+    left:50%;
+    bottom:96px;
+    transform:translate(-50%,12px);
+    max-width:min(88%,420px);
+    padding:9px 15px;
+    border-radius:12px;
+    background:#232838;
+    border:1px solid var(--line-strong);
+    color:var(--text);
+    font-size:12.5px;
+    line-height:1.4;
+    text-align:center;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .22s ease,transform .22s ease;
+    z-index:20;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* ---------- settings dialog ---------- */
+  dialog{
+    width:min(580px,94vw);
+    max-height:90vh;
+    padding:0;
+    border:1px solid var(--line-strong);
+    border-radius:22px;
+    background:var(--panel);
+    color:var(--text);
+    box-shadow:0 30px 80px rgba(0,0,0,.6);
+    overflow:hidden;
+  }
+  dialog::backdrop{background:rgba(5,7,11,.7);backdrop-filter:blur(3px)}
+  dialog[open]{animation:pop .22s ease both}
+  @keyframes pop{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
+
+  .sheet{
+    display:flex;
+    flex-direction:column;
+    max-height:90vh;
+  }
+  .sheet-head{
+    padding:20px 22px 0;
+  }
+  .sheet-head h2{margin:0 0 5px;font-size:17px;font-weight:650}
+  .sheet-head p{margin:0;color:var(--muted);font-size:12.5px;line-height:1.5}
+  .sheet-body{
+    padding:18px 22px 8px;
+    overflow-y:auto;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:12px;font-weight:600;color:#aeb6c9;letter-spacing:.2px}
+  .field input{
+    padding:11px 13px;
+    border-radius:12px;
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    color:var(--text);
+    font:inherit;
+    font-size:14px;
+  }
+  .field input:focus{
+    outline:none;
+    border-color:rgba(124,92,255,.6);
+    box-shadow:0 0 0 3px rgba(124,92,255,.16);
+  }
+  .field .hint{font-size:11.5px;color:var(--muted);line-height:1.45}
+  .field .hint code,
+  .empty code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11.5px;
+    padding:1px 5px;
+    border-radius:5px;
+    background:rgba(255,255,255,.08);
+    color:#cdd4e6;
+  }
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+  .chip{
+    padding:6px 11px;
+    border-radius:999px;
+    border:1px solid var(--line-strong);
+    background:rgba(255,255,255,.04);
+    font-size:12px;
+    color:var(--muted);
+    cursor:pointer;
+    transition:background .16s ease,color .16s ease,border-color .16s ease;
+  }
+  .chip:hover{background:rgba(255,255,255,.09);color:var(--text)}
+  .chip[aria-pressed="true"]{
+    color:#fff;
+    border-color:rgba(124,92,255,.55);
+    background:rgba(124,92,255,.22);
+  }
+
+  details.server{
+    border:1px solid var(--line);
+    border-radius:14px;
+    background:rgba(255,255,255,.03);
+    overflow:hidden;
+  }
+  details.server summary{
+    padding:11px 14px;
+    font-size:12.5px;
+    font-weight:600;
+    color:#aeb6c9;
+    cursor:pointer;
+    list-style:none;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  details.server summary::-webkit-details-marker{display:none}
+  details.server summary::before{
+    content:"";
+    width:6px;height:6px;
+    border-right:1.6px solid currentColor;
+    border-bottom:1.6px solid currentColor;
+    transform:rotate(-45deg);
+    transition:transform .18s ease;
+    flex:none;
+  }
+  details.server[open] summary::before{transform:rotate(45deg)}
+  .server-inner{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}
+  .server-inner p{margin:0;font-size:12px;line-height:1.55;color:var(--muted)}
+  .server-inner code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11.5px;
+    padding:1px 5px;
+    border-radius:5px;
+    background:rgba(255,255,255,.08);
+    color:#cdd4e6;
+  }
+  .server-inner pre{
+    margin:0;
+    max-height:210px;
+    overflow:auto;
+    padding:12px;
+    border-radius:10px;
+    background:#0b0e15;
+    border:1px solid var(--line);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11px;
+    line-height:1.5;
+    color:#c3cbdd;
+  }
+  .server-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+  .sheet-foot{
+    padding:14px 22px calc(18px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);
+    display:flex;
+    gap:10px;
+    justify-content:flex-end;
+    background:var(--panel);
+  }
+  .btn{
+    padding:10px 16px;
+    border-radius:12px;
+    border:1px solid var(--line-strong);
+    background:rgba(255,255,255,.05);
+    font-size:13.5px;
+    font-weight:600;
+    cursor:pointer;
+    transition:background .16s ease,transform .16s ease;
+  }
+  .btn:hover{background:rgba(255,255,255,.11)}
+  .btn:active{transform:scale(.98)}
+  .btn.primary{
+    border:none;
+    color:#fff;
+    background:linear-gradient(135deg,var(--accent),#4c6ef5);
+    box-shadow:0 8px 20px rgba(124,92,255,.3);
+  }
+  .btn.primary:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent}
+  a.btn{
+    display:inline-flex;
+    align-items:center;
+    text-decoration:none;
+    color:inherit;
+  }
+
+  @media (max-width:520px){
+    .pair{grid-template-columns:1fr}
+    .status{padding:7px 10px;font-size:11.5px}
+    .brand-text h1{font-size:14px}
+    .body{max-width:82%}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.2-.5L3 21l1.6-4.5A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4Z"/>
+        </svg>
+      </span>
+      <div class="brand-text">
+        <h1>Chat Room</h1>
+        <span class="room" id="roomLabel">#lobby</span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="status" id="status" type="button" data-state="idle" title="Connection status">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="statusText">Offline</span>
+      </button>
+      <button class="icon-btn" id="settingsBtn" type="button" aria-label="Connection settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="stream" id="messages" role="log" aria-live="polite" aria-label="Messages">
+    <div class="empty" id="empty">
+      <div class="glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.2-.5L3 21l1.6-4.5A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4Z"/>
+        </svg>
+      </div>
+      <h2>Say something</h2>
+      <p>Everything here lives in this one HTML file and travels over a <strong>WSS</strong> WebSocket. Anyone connected to the same room on the same relay sees your messages.</p>
+      <p>Open <strong>Settings</strong> to change the server, grab the relay that goes with this page, or get it onto a public URL.</p>
+    </div>
+  </main>
+
+  <div class="typing" id="typing" aria-live="polite">
+    <span id="typingText"></span><i></i><i></i><i></i>
+  </div>
+
+  <form class="composer" id="composer">
+    <textarea id="input" rows="1" placeholder="Message #lobby" aria-label="Message" maxlength="2000"></textarea>
+    <button class="send" id="send" type="submit" aria-label="Send message" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 19V5M5 12l7-7 7 7"/>
+      </svg>
+    </button>
+  </form>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<dialog id="setup" aria-labelledby="setupTitle">
+  <form class="sheet" id="setupForm">
+    <div class="sheet-head">
+      <h2 id="setupTitle">Connection</h2>
+      <p>Point the room at a WSS relay, pick a room name and say who you are.</p>
+    </div>
+
+    <div class="sheet-body">
+      <div class="field">
+        <label for="serverUrl">Server URL</label>
+        <input id="serverUrl" type="text" inputmode="url" spellcheck="false" autocomplete="off"
+               placeholder="wss://your-relay.example.com">
+        <div class="chips" id="presets">
+          <button type="button" class="chip" data-url="wss://echo.websocket.org">Echo test server</button>
+          <button type="button" class="chip" data-url="ws://localhost:8080">Local relay</button>
+        </div>
+        <div class="hint" id="mixedHint" hidden>This page is served over https, so the browser will block a <code>ws://</code> address. Use <code>wss://</code>.</div>
+      </div>
+
+      <div class="pair">
+        <div class="field">
+          <label for="roomName">Room</label>
+          <input id="roomName" type="text" spellcheck="false" autocomplete="off" maxlength="32" placeholder="lobby">
+        </div>
+        <div class="field">
+          <label for="displayName">Your name</label>
+          <input id="displayName" type="text" autocomplete="nickname" maxlength="40" placeholder="Guest">
+        </div>
+      </div>
+
+      <details class="server" id="serverHelp">
+        <summary>Need a server? Copy the relay</summary>
+        <div class="server-inner">
+          <p>A browser can make WSS connections but it cannot accept them, so a room needs a relay. This is a tiny Node.js one with a single dependency (<code>ws</code>). Its address gets <code>wss://</code> once it is behind TLS — Render, Fly, Railway or any reverse proxy will do that for you.</p>
+          <p>Run it locally with <code>npm i ws</code> then <code>node server.js</code>, and connect to <code>ws://localhost:8080</code>.</p>
+          <pre id="serverPreview" tabindex="0"></pre>
+          <div class="server-actions">
+            <button type="button" class="btn" id="copyServer">Copy code</button>
+            <button type="button" class="btn" id="downloadServer">Download server.js</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="server" id="publishHelp">
+        <summary>Put it online (static host or cloudflared)</summary>
+        <div class="server-inner">
+          <p>For a permanent address, put this one file on a static host that serves https — Cloudflare Pages, GitHub Pages, Netlify — and nothing has to stay running. For a temporary link from your own machine, <code>node serve.js</code> plus <code>cloudflared tunnel --url http://localhost:8080</code> does it.</p>
+          <p>Either way the page is https, so the socket must be <code>wss://</code>. The relay itself still needs a host of its own; the guide lists free ones.</p>
+          <p>The guide and the server script ship with the page:</p>
+          <div class="server-actions">
+            <a class="btn" href="README.md" target="_blank" rel="noopener">Hosting guide</a>
+            <a class="btn" href="serve.js" download="serve.js">Download serve.js</a>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="sheet-foot">
+      <button type="button" class="btn ghost" id="disconnectBtn">Disconnect</button>
+      <button type="submit" class="btn primary" id="joinBtn">Join room</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="text/plain" id="relaySource">
+// Tiny WSS chat relay for the single-file chat room.
+//
+//   npm init -y && npm i ws
+//   node server.js            ->  ws://localhost:8080
+//
+// Put it behind TLS (Render, Fly, Railway, Caddy, nginx) and connect with wss://.
+'use strict';
+
+const http = require('http');
+const { WebSocketServer } = require('ws');
+
+const PORT = process.env.PORT || 8080;
+const HISTORY_LIMIT = 50;
+
+const rooms = new Map();
+
+function room(key) {
+  if (!rooms.has(key)) rooms.set(key, { clients: new Set(), history: [] });
+  return rooms.get(key);
+}
+
+function names(r) {
+  const out = [];
+  for (const c of r.clients) if (c.name && !out.includes(c.name)) out.push(c.name);
+  return out;
+}
+
+function send(ws, obj) {
+  if (ws.readyState === 1) ws.send(JSON.stringify(obj));
+}
+
+function broadcast(r, obj, except) {
+  const data = JSON.stringify(obj);
+  for (const c of r.clients) {
+    if (c !== except && c.readyState === 1) c.send(data);
+  }
+}
+
+function leave(ws) {
+  const key = ws.room;
+  if (!key) return;
+  ws.room = null;
+  const r = rooms.get(key);
+  if (!r) return;
+  r.clients.delete(ws);
+  broadcast(r, { type: 'system', text: ws.name + ' left #' + key });
+  broadcast(r, { type: 'presence', users: names(r) });
+}
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+  res.end('Chat relay running. Connect a WebSocket client.\n');
+});
+
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws) => {
+  ws.room = null;
+  ws.name = 'guest';
+  ws.isAlive = true;
+
+  ws.on('pong', () => { ws.isAlive = true; });
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.type === 'join') {
+      const name = String(msg.name || 'guest').slice(0, 40);
+      const key = String(msg.room || 'lobby')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '')
+        .slice(0, 32) || 'lobby';
+
+      if (ws.room && ws.room !== key) leave(ws);
+      ws.name = name;
+      ws.room = key;
+
+      const r = room(key);
+      r.clients.add(ws);
+
+      send(ws, { type: 'welcome', room: key, you: name, users: names(r), history: r.history });
+      broadcast(r, { type: 'system', text: name + ' joined #' + key }, ws);
+      broadcast(r, { type: 'presence', users: names(r) });
+      return;
+    }
+
+    if (!ws.room) return;
+    const r = room(ws.room);
+
+    if (msg.type === 'msg') {
+      const text = String(msg.text || '').slice(0, 2000);
+      if (!text.trim()) return;
+      const out = {
+        type: 'msg',
+        id: String(msg.id || ''),
+        name: ws.name,
+        text: text,
+        ts: Date.now()
+      };
+      r.history.push(out);
+      if (r.history.length > HISTORY_LIMIT) r.history.shift();
+      broadcast(r, out);
+      return;
+    }
+
+    if (msg.type === 'typing') {
+      broadcast(r, { type: 'typing', name: ws.name }, ws);
+      return;
+    }
+
+    if (msg.type === 'ping') send(ws, { type: 'pong' });
+  });
+
+  ws.on('close', () => leave(ws));
+  ws.on('error', () => leave(ws));
+});
+
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, 30000);
+
+server.listen(PORT, () => console.log('Chat relay on ws://localhost:' + PORT));
+</script>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+
+  const STORE_KEY = 'chatroom.v1';
+  const MAX_LEN = 2000;
+  const MAX_ATTEMPTS = 6;
+
+  const el = {
+    messages: $('#messages'),
+    empty: $('#empty'),
+    typing: $('#typing'),
+    typingText: $('#typingText'),
+    form: $('#composer'),
+    input: $('#input'),
+    send: $('#send'),
+    status: $('#status'),
+    statusText: $('#statusText'),
+    roomLabel: $('#roomLabel'),
+    settingsBtn: $('#settingsBtn'),
+    toast: $('#toast'),
+    dialog: $('#setup'),
+    form2: $('#setupForm'),
+    url: $('#serverUrl'),
+    room: $('#roomName'),
+    name: $('#displayName'),
+    joinBtn: $('#joinBtn'),
+    disconnectBtn: $('#disconnectBtn'),
+    presets: Array.from(document.querySelectorAll('#presets [data-url]')),
+    mixedHint: $('#mixedHint'),
+    relaySource: $('#relaySource'),
+    serverPreview: $('#serverPreview'),
+    copyServer: $('#copyServer'),
+    downloadServer: $('#downloadServer')
+  };
+
+  const state = {
+    url: 'wss://echo.websocket.org',
+    room: 'lobby',
+    name: '',
+    ws: null,
+    status: 'idle',
+    statusLabel: '',
+    manual: false,
+    relay: false,
+    attempts: 0,
+    peers: [],
+    mine: new Set(),
+    lastAuthor: '',
+    lastAt: 0,
+    lastRoom: '',
+    lastUrl: '',
+    lastSeen: 0,
+    lastTypingSent: 0,
+    timers: {
+      reconnect: 0,
+      countdown: 0,
+      ping: 0,
+      watchdog: 0,
+      typing: 0,
+      hint: 0
+    }
+  };
+
+  const STATUS = {
+    idle: { text: 'Offline' },
+    connecting: { text: 'Connecting…' },
+    online: { text: 'Online' },
+    retrying: { text: 'Reconnecting…' },
+    offline: { text: 'Offline' },
+    error: { text: 'Error' }
+  };
+
+  /* ------------------------------ helpers ------------------------------ */
+
+  const now = () => Date.now();
+
+  function uid() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return Math.random().toString(36).slice(2) + now().toString(36);
+  }
+
+  function clamp(str, max) {
+    return str.length > max ? str.slice(0, max) : str;
+  }
+
+  function timeStr(ts) {
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '';
+    }
+  }
+
+  function initials(name) {
+    const parts = String(name).trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  function hueFor(name) {
+    let h = 0;
+    const str = String(name);
+    for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360;
+    return h;
+  }
+
+  function toast(text, ms = 2600) {
+    el.toast.textContent = text;
+    el.toast.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.toast.classList.remove('show'), ms);
+  }
+
+  /* ---------------------------- persistence ---------------------------- */
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object') {
+        if (typeof saved.url === 'string' && saved.url.trim()) state.url = saved.url;
+        if (typeof saved.room === 'string' && saved.room.trim()) state.room = saved.room;
+        if (typeof saved.name === 'string' && saved.name.trim()) state.name = saved.name;
+      }
+    } catch {
+      /* storage unavailable — carry on with defaults */
+    }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        url: state.url,
+        room: state.room,
+        name: state.name
+      }));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /* ------------------------------ messages ----------------------------- */
+
+  function isNearBottom() {
+    const m = el.messages;
+    return m.scrollHeight - m.scrollTop - m.clientHeight < 120;
+  }
+
+  function scrollToBottom(smooth) {
+    const m = el.messages;
+    m.scrollTo({ top: m.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  function clearMessages() {
+    Array.from(el.messages.children).forEach((node) => {
+      if (node !== el.empty) node.remove();
+    });
+    el.empty.hidden = false;
+    state.lastAuthor = '';
+    state.lastAt = 0;
+  }
+
+  function addMessage(opts) {
+    const name = String(opts.name || 'anonymous');
+    const ts = Number(opts.ts) || now();
+    const self = !!opts.self;
+    const text = String(opts.text == null ? '' : opts.text);
+
+    if (!text.trim()) return;
+
+    const near = isNearBottom();
+
+    if (el.empty) el.empty.hidden = true;
+
+    const grouped = state.lastAuthor === name && ts - state.lastAt < 5 * 60 * 1000;
+
+    const row = document.createElement('div');
+    row.className = 'row' + (self ? ' self' : '') + (grouped ? ' grouped' : '');
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.style.setProperty('--h', String(hueFor(name)));
+    avatar.textContent = initials(name);
+    avatar.setAttribute('aria-hidden', 'true');
+
+    const body = document.createElement('div');
+    body.className = 'body';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = self ? 'You' : name;
+
+    const time = document.createElement('time');
+    time.textContent = timeStr(ts);
+    try {
+      time.dateTime = new Date(ts).toISOString();
+    } catch {
+      /* ignore */
+    }
+
+    meta.append(who, time);
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+
+    body.append(meta, bubble);
+    row.append(avatar, body);
+    el.messages.append(row);
+
+    state.lastAuthor = name;
+    state.lastAt = ts;
+
+    if (near) scrollToBottom(true);
+  }
+
+  function addSystem(text) {
+    const value = String(text == null ? '' : text).trim();
+    if (!value) return;
+
+    const near = isNearBottom();
+    if (el.empty) el.empty.hidden = true;
+
+    const note = document.createElement('div');
+    note.className = 'system';
+    note.textContent = value;
+    el.messages.append(note);
+
+    state.lastAuthor = '';
+    state.lastAt = 0;
+
+    if (near) scrollToBottom(false);
+  }
+
+  /* ------------------------------ status ------------------------------- */
+
+  function refreshStatus() {
+    const base = STATUS[state.status] || STATUS.idle;
+    const label = state.statusLabel || base.text;
+    const people = state.status === 'online' && state.peers.length
+      ? ' · ' + state.peers.length + ' in room'
+      : '';
+
+    el.status.dataset.state = state.status;
+    el.statusText.textContent = label + people;
+    el.status.title = state.peers.length ? 'In room: ' + state.peers.join(', ') : 'Connection status';
+
+    const online = state.status === 'online';
+    el.send.disabled = !online;
+    el.input.placeholder = online ? 'Message #' + state.room : 'Not connected — open settings';
+  }
+
+  function setStatus(kind, label) {
+    state.status = kind;
+    state.statusLabel = label || (STATUS[kind] ? STATUS[kind].text : '');
+    refreshStatus();
+  }
+
+  function setPeers(users) {
+    state.peers = (Array.isArray(users) ? users : [])
+      .map((n) => String(n || '').trim())
+      .filter(Boolean)
+      .slice(0, 200);
+    refreshStatus();
+  }
+
+  function showTyping(name) {
+    el.typingText.textContent = name + ' is typing';
+    el.typing.classList.add('on');
+    clearTimeout(state.timers.typing);
+    state.timers.typing = setTimeout(() => el.typing.classList.remove('on'), 3200);
+  }
+
+  function hideTyping() {
+    clearTimeout(state.timers.typing);
+    el.typing.classList.remove('on');
+  }
+
+  /* ---------------------------- connection ----------------------------- */
+
+  function send(obj) {
+    const ws = state.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function stopHeartbeat() {
+    clearInterval(state.timers.ping);
+    clearInterval(state.timers.watchdog);
+    state.timers.ping = 0;
+    state.timers.watchdog = 0;
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+
+    state.timers.ping = setInterval(() => {
+      send({ type: 'ping', t: now() });
+    }, 25000);
+
+    state.timers.watchdog = setInterval(() => {
+      const ws = state.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (now() - state.lastSeen > 70000) {
+        addSystem('The server stopped answering — reconnecting.');
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    }, 10000);
+  }
+
+  function closeSocket() {
+    clearTimeout(state.timers.hint);
+    hideTyping();
+    stopHeartbeat();
+
+    const ws = state.ws;
+    state.ws = null;
+    if (ws) {
+      try {
+        ws.close(1000, 'bye');
+      } catch {
+        /* ignore */
+      }
+    }
+    state.relay = false;
+  }
+
+  function scheduleReconnect() {
+    if (state.manual) return;
+
+    clearTimeout(state.timers.reconnect);
+    clearInterval(state.timers.countdown);
+
+    if (state.attempts >= MAX_ATTEMPTS) {
+      setStatus('offline', 'Offline — tap to retry');
+      return;
+    }
+
+    state.attempts += 1;
+    const delay = Math.min(15000, 900 * Math.pow(1.8, state.attempts - 1)) + Math.random() * 400;
+    let left = Math.max(1, Math.ceil(delay / 1000));
+
+    setStatus('retrying', 'Reconnecting in ' + left + 's');
+
+    state.timers.countdown = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(state.timers.countdown);
+        return;
+      }
+      state.statusLabel = 'Reconnecting in ' + left + 's';
+      refreshStatus();
+    }, 1000);
+
+    state.timers.reconnect = setTimeout(() => {
+      clearInterval(state.timers.countdown);
+      connect();
+    }, delay);
+  }
+
+  function connect() {
+    closeSocket();
+
+    state.manual = false;
+    clearTimeout(state.timers.reconnect);
+    clearInterval(state.timers.countdown);
+
+    const rawUrl = state.url.trim();
+    if (!rawUrl) {
+      openSetup();
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      addSystem('That server address is not a valid URL.');
+      setStatus('error', 'Bad address');
+      return;
+    }
+
+    if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') {
+      addSystem('The server address must start with wss:// (or ws:// for local testing).');
+      setStatus('error', 'Bad address');
+      return;
+    }
+
+    if (location.protocol === 'https:' && parsed.protocol === 'ws:') {
+      addSystem('This page is served over https, so the browser will block ws:// — switch the address to wss://.');
+    }
+
+    if (state.room !== state.lastRoom || state.url !== state.lastUrl) {
+      clearMessages();
+      state.lastRoom = state.room;
+      state.lastUrl = state.url;
+    }
+
+    setStatus('connecting');
+    el.roomLabel.textContent = '#' + state.room;
+
+    let ws;
+    try {
+      ws = new WebSocket(rawUrl);
+    } catch (err) {
+      addSystem('Could not open a connection: ' + (err && err.message ? err.message : 'unknown error'));
+      setStatus('error', 'Connection failed');
+      scheduleReconnect();
+      return;
+    }
+
+    state.ws = ws;
+    state.relay = false;
+    state.peers = [];
+    state.lastSeen = now();
+
+    ws.addEventListener('open', () => {
+      if (state.ws !== ws) return;
+
+      state.attempts = 0;
+      setStatus('online');
+      console.log('[chat] connected to ' + parsed.host);
+      addSystem('Connected to ' + parsed.host + ' as ' + state.name);
+      send({ type: 'join', room: state.room, name: state.name });
+      startHeartbeat();
+
+      clearTimeout(state.timers.hint);
+      state.timers.hint = setTimeout(() => {
+        if (state.ws === ws && ws.readyState === WebSocket.OPEN && !state.relay) {
+          addSystem('This server never confirmed the room — it may be an echo server. For real multi-user chat, run the relay from Settings.');
+        }
+      }, 2500);
+    });
+
+    ws.addEventListener('message', (ev) => {
+      if (state.ws !== ws) return;
+      state.lastSeen = now();
+      handleIncoming(ev.data);
+    });
+
+    ws.addEventListener('close', () => {
+      if (state.ws !== ws) return;
+      console.warn('[chat] disconnected');
+      stopHeartbeat();
+      state.relay = false;
+      state.peers = [];
+      if (state.manual) {
+        setStatus('idle');
+        return;
+      }
+      setStatus('offline', 'Disconnected');
+      scheduleReconnect();
+    });
+
+    ws.addEventListener('error', () => {
+      /* the close event that follows does the work */
+    });
+  }
+
+  function disconnect() {
+    state.manual = true;
+    clearTimeout(state.timers.reconnect);
+    clearInterval(state.timers.countdown);
+    state.attempts = 0;
+    closeSocket();
+    setStatus('idle');
+  }
+
+  /* -------------------------- incoming frames -------------------------- */
+
+  function handleIncoming(raw) {
+    if (typeof raw !== 'string') return;
+
+    let msg = null;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      msg = null;
+    }
+
+    if (!msg || typeof msg !== 'object') {
+      addSystem(raw.trim() ? 'Server: ' + raw.trim() : '');
+      return;
+    }
+
+    switch (msg.type) {
+      case 'welcome': {
+        state.relay = true;
+        clearTimeout(state.timers.hint);
+
+        if (Array.isArray(msg.history)) {
+          msg.history.forEach((entry) => {
+            if (entry && typeof entry === 'object') renderIncoming(entry, { history: true });
+          });
+          if (msg.history.length) scrollToBottom(false);
+        }
+        if (Array.isArray(msg.users)) setPeers(msg.users);
+        break;
+      }
+      case 'msg':
+        renderIncoming(msg);
+        break;
+      case 'system':
+        addSystem(msg.text);
+        break;
+      case 'presence':
+        setPeers(msg.users);
+        break;
+      case 'typing':
+        if (msg.name && msg.name !== state.name) showTyping(String(msg.name));
+        break;
+      default:
+        break;
+    }
+  }
+
+  function renderIncoming(msg, opts) {
+    const options = opts || {};
+    const id = msg.id == null ? '' : String(msg.id);
+
+    if (id && !options.history && state.mine.has(id)) return;
+
+    const name = String(msg.name || 'anonymous');
+    const text = String(msg.text == null ? '' : msg.text);
+    const ts = Number(msg.ts) || now();
+
+    addMessage({
+      name: name,
+      text: text,
+      ts: ts,
+      self: state.mine.has(msg.id) || name === state.name
+    });
+  }
+
+  /* ------------------------------- input ------------------------------- */
+
+  function autoGrow() {
+    const t = el.input;
+    t.style.height = 'auto';
+    t.style.height = Math.min(t.scrollHeight, 132) + 'px';
+  }
+
+  function sendMessage() {
+    const text = el.input.value.replace(/\s+$/, '');
+    if (!text.trim()) return;
+
+    if (state.status !== 'online') {
+      toast('Not connected yet.');
+      return;
+    }
+
+    const body = clamp(text, MAX_LEN);
+    const id = uid();
+
+    if (!send({ type: 'msg', id: id, text: body })) {
+      toast('Message not sent — the connection was lost.');
+      return;
+    }
+
+    if (state.mine.size > 500) state.mine.clear();
+    state.mine.add(id);
+
+    addMessage({ name: state.name, text: body, ts: now(), self: true });
+
+    el.input.value = '';
+    autoGrow();
+    hideTyping();
+    el.input.focus();
+  }
+
+  /* ------------------------------ settings ----------------------------- */
+
+  function syncFields() {
+    el.url.value = state.url;
+    el.room.value = state.room;
+    el.name.value = state.name;
+    el.roomLabel.textContent = '#' + state.room;
+    if (state.status !== 'online') el.input.placeholder = 'Not connected — open settings';
+    markPresetChips();
+  }
+
+  function markPresetChips() {
+    const current = el.url.value.trim();
+    el.presets.forEach((chip) => {
+      chip.setAttribute('aria-pressed', chip.dataset.url === current ? 'true' : 'false');
+    });
+    el.mixedHint.hidden = !(location.protocol === 'https:' && /^ws:\/\//i.test(current));
+  }
+
+  function openSetup() {
+    el.url.value = state.url;
+    el.room.value = state.room;
+    el.name.value = state.name;
+    el.serverPreview.textContent = el.relaySource.textContent.trim();
+    el.mixedHint.hidden = !(location.protocol === 'https:' && /^ws:\/\//i.test(state.url));
+    el.presets.forEach((chip) => {
+      chip.setAttribute('aria-pressed', chip.dataset.url === state.url.trim() ? 'true' : 'false');
+    });
+    if (typeof el.dialog.showModal === 'function') {
+      if (!el.dialog.open) el.dialog.showModal();
+    } else {
+      el.dialog.setAttribute('open', '');
+    }
+  }
+
+  function closeSetup() {
+    if (typeof el.dialog.close === 'function' && el.dialog.open) el.dialog.close();
+    else el.dialog.removeAttribute('open');
+  }
+
+  function applySetup(event) {
+    event.preventDefault();
+
+    const url = el.url.value.trim();
+    if (!url) {
+      toast('Enter a server URL first.');
+      return;
+    }
+
+    const room = el.room.value.trim().toLowerCase().replace(/^#/, '').replace(/[^a-z0-9_-]/g, '').slice(0, 32) || 'lobby';
+    const name = clamp(el.name.value.trim(), 40) || state.name || 'Guest';
+
+    state.url = url;
+    state.room = room;
+    state.name = name;
+    state.attempts = 0;
+
+    saveSettings();
+    syncFields();
+    closeSetup();
+    connect();
+  }
+
+  /* ------------------------------- wiring ------------------------------ */
+
+  function bindEvents() {
+    el.form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      sendMessage();
+    });
+
+    el.input.addEventListener('input', () => {
+      autoGrow();
+      if (state.status !== 'online') return;
+      const t = now();
+      if (t - state.lastTypingSent > 2200) {
+        state.lastTypingSent = t;
+        send({ type: 'typing' });
+      }
+    });
+
+    el.input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    el.settingsBtn.addEventListener('click', openSetup);
+
+    el.status.addEventListener('click', () => {
+      if (state.status === 'online' || state.status === 'connecting') return;
+      state.attempts = 0;
+      connect();
+    });
+
+    el.form2.addEventListener('submit', applySetup);
+
+    el.disconnectBtn.addEventListener('click', () => {
+      disconnect();
+      closeSetup();
+    });
+
+    el.presets.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        el.url.value = chip.dataset.url;
+        markPresetChips();
+        el.url.focus();
+      });
+    });
+
+    el.url.addEventListener('input', markPresetChips);
+
+    document.querySelectorAll('#setup a[href]').forEach((link) => {
+      link.addEventListener('click', () => {
+        closeSetup();
+      });
+    });
+
+    el.dialog.addEventListener('close', () => {
+      if (!state.name) state.name = 'Guest';
+    });
+
+    el.copyServer.addEventListener('click', async () => {
+      const code = el.relaySource.textContent.trim() + '\n';
+      try {
+        await navigator.clipboard.writeText(code);
+        toast('Relay code copied.');
+      } catch {
+        toast('Copy failed — select the code and copy it manually.');
+      }
+    });
+
+    el.downloadServer.addEventListener('click', () => {
+      const blob = new Blob([el.relaySource.textContent.trim() + '\n'], { type: 'text/javascript' });
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = 'server.js';
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 4000);
+    });
+
+    window.addEventListener('online', () => {
+      if (state.status === 'offline') {
+        state.attempts = 0;
+        connect();
+      }
+    });
+  }
+
+  function init() {
+    loadSettings();
+
+    if (!state.name) {
+      state.name = 'Guest ' + Math.floor(100 + Math.random() * 900);
+    }
+
+    bindEvents();
+    syncFields();
+    setStatus('idle');
+    autoGrow();
+
+    if (state.url) connect();
+    else openSetup();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
